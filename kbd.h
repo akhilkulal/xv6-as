@@ -31,7 +31,7 @@
 // C('A') == Control-A
 #define C(x) (x - '@')
 
-//count of keyboard interrupts
+
 static uchar shiftcode[256] =
 {
   [0x1D] CTL,

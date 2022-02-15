@@ -1,0 +1,284 @@
+diff --git a/Makefile b/Makefile
+index 09d790c..4b41fe6 100644
+--- a/Makefile
++++ b/Makefile
+@@ -28,6 +28,7 @@ OBJS = \
+ 	vectors.o\
+ 	vm.o\
+ 
++
+ # Cross-compiling (e.g., on Mac OS X)
+ # TOOLPREFIX = i386-jos-elf
+ 
+@@ -181,6 +182,7 @@ UPROGS=\
+ 	_usertests\
+ 	_wc\
+ 	_zombie\
++	_newsyscall\
+ 
+ fs.img: mkfs README $(UPROGS)
+ 	./mkfs fs.img README $(UPROGS)
+diff --git a/defs.h b/defs.h
+index 82fb982..2f2cf57 100644
+--- a/defs.h
++++ b/defs.h
+@@ -70,6 +70,7 @@ void            kinit1(void*, void*);
+ void            kinit2(void*, void*);
+ 
+ // kbd.c
++extern int kbdintrvar;
+ void            kbdintr(void);
+ 
+ // lapic.c
+@@ -103,6 +104,8 @@ int             pipewrite(struct pipe*, char*, int);
+ 
+ //PAGEBREAK: 16
+ // proc.c
++extern int forkcount;
++extern int schedulercount;
+ int             cpuid(void);
+ void            exit(void);
+ int             fork(void);
+@@ -160,6 +163,11 @@ void            syscall(void);
+ void            timerinit(void);
+ 
+ // trap.c
++extern int runnablestate;
++extern int sleepingstate;
++extern int zombiestate;
++void            allprocessstatecount(void);
++extern int trapcount;
+ void            idtinit(void);
+ extern uint     ticks;
+ void            tvinit(void);
+diff --git a/kbd.c b/kbd.c
+index 32c1463..0a47b98 100644
+--- a/kbd.c
++++ b/kbd.c
+@@ -2,7 +2,7 @@
+ #include "x86.h"
+ #include "defs.h"
+ #include "kbd.h"
+-
++int kbdintrvar = 0;
+ int
+ kbdgetc(void)
+ {
+@@ -46,5 +46,6 @@ kbdgetc(void)
+ void
+ kbdintr(void)
+ {
++  kbdintrvar++;
+   consoleintr(kbdgetc);
+ }
+diff --git a/kbd.h b/kbd.h
+index babbd6e..d7198e0 100644
+--- a/kbd.h
++++ b/kbd.h
+@@ -31,6 +31,7 @@
+ // C('A') == Control-A
+ #define C(x) (x - '@')
+ 
++//count of keyboard interrupts
+ static uchar shiftcode[256] =
+ {
+   [0x1D] CTL,
+diff --git a/newsyscall.c b/newsyscall.c
+new file mode 100644
+index 0000000..11433fc
+--- /dev/null
++++ b/newsyscall.c
+@@ -0,0 +1,14 @@
++#include "types.h"
++#include "stat.h"
++#include "user.h"
++//forkcount ->defs.h
++//runnable
++//zombie
++//sleeping
++//schedular->defs.h
++//keyboard->kbd.h
++//traps->trap.h
++int main(){
++    newsyscall();
++    exit();
++}
+\ No newline at end of file
+diff --git a/proc.c b/proc.c
+index 806b1b1..3ce771e 100644
+--- a/proc.c
++++ b/proc.c
+@@ -6,7 +6,9 @@
+ #include "x86.h"
+ #include "proc.h"
+ #include "spinlock.h"
+-
++int forkcount = 0;
++int schedulercount = 0;
++int runnablestate,zombiestate, sleepingstate;
+ struct {
+   struct spinlock lock;
+   struct proc proc[NPROC];
+@@ -202,7 +204,7 @@ fork(void)
+ 
+   // Clear %eax so that fork returns 0 in the child.
+   np->tf->eax = 0;
+-
++  forkcount++;
+   for(i = 0; i < NOFILE; i++)
+     if(curproc->ofile[i])
+       np->ofile[i] = filedup(curproc->ofile[i]);
+@@ -342,7 +344,7 @@ scheduler(void)
+       c->proc = p;
+       switchuvm(p);
+       p->state = RUNNING;
+-
++      schedulercount++;
+       swtch(&(c->scheduler), p->context);
+       switchkvm();
+ 
+@@ -353,6 +355,7 @@ scheduler(void)
+     release(&ptable.lock);
+ 
+   }
++
+ }
+ 
+ // Enter scheduler.  Must hold only ptable.lock
+@@ -379,6 +382,7 @@ sched(void)
+   intena = mycpu()->intena;
+   swtch(&p->context, mycpu()->scheduler);
+   mycpu()->intena = intena;
++  schedulercount++;
+ }
+ 
+ // Give up the CPU for one scheduling round.
+@@ -532,3 +536,23 @@ procdump(void)
+     cprintf("\n");
+   }
+ }
++
++void allprocessstatecount(void){
++    runnablestate = 0;
++    sleepingstate = 0;
++    zombiestate = 0;
++    struct proc *p;
++    acquire(&ptable.lock);
++    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
++      if(p->state == RUNNABLE){
++        runnablestate++;
++      }
++      else if(p->state == SLEEPING){
++        sleepingstate++;
++      }
++      else if(p->state == ZOMBIE){
++        zombiestate++;
++      }
++    }
++    release(&ptable.lock);
++}
+\ No newline at end of file
+diff --git a/proc.h b/proc.h
+index 1647114..91d0f05 100644
+--- a/proc.h
++++ b/proc.h
+@@ -56,3 +56,4 @@ struct proc {
+ //   original data and bss
+ //   fixed-size stack
+ //   expandable heap
++
+diff --git a/syscall.c b/syscall.c
+index ee85261..6b30984 100644
+--- a/syscall.c
++++ b/syscall.c
+@@ -103,6 +103,7 @@ extern int sys_unlink(void);
+ extern int sys_wait(void);
+ extern int sys_write(void);
+ extern int sys_uptime(void);
++extern int sys_newsyscall(void);
+ 
+ static int (*syscalls[])(void) = {
+ [SYS_fork]    sys_fork,
+@@ -126,6 +127,7 @@ static int (*syscalls[])(void) = {
+ [SYS_link]    sys_link,
+ [SYS_mkdir]   sys_mkdir,
+ [SYS_close]   sys_close,
++[SYS_newsyscall] sys_newsyscall,
+ };
+ 
+ void
+diff --git a/syscall.h b/syscall.h
+index bc5f356..ca70ce1 100644
+--- a/syscall.h
++++ b/syscall.h
+@@ -20,3 +20,4 @@
+ #define SYS_link   19
+ #define SYS_mkdir  20
+ #define SYS_close  21
++#define SYS_newsyscall 22
+\ No newline at end of file
+diff --git a/sysfile.c b/sysfile.c
+index bfe61b7..9672860 100644
+--- a/sysfile.c
++++ b/sysfile.c
+@@ -442,3 +442,16 @@ sys_pipe(void)
+   fd[1] = fd1;
+   return 0;
+ }
++
++int 
++sys_newsyscall(void){
++  cprintf("keyboard interrupt count: %d\n",kbdintrvar);
++  cprintf("fork count: %d\n",forkcount);
++  cprintf("Number of scheduling: %d\n",schedulercount);
++  cprintf("Number of traps: %d\n",trapcount);
++  allprocessstatecount();
++  cprintf("Current count of RUNNABLE process : %d\n",runnablestate);
++  cprintf("Current count of SLEEPING process : %d\n",sleepingstate);
++  cprintf("Current count of ZOMBIE process : %d\n",zombiestate);
++  return 0;
++}
+\ No newline at end of file
+diff --git a/trap.c b/trap.c
+index 41c66eb..9d3708a 100644
+--- a/trap.c
++++ b/trap.c
+@@ -13,7 +13,7 @@ struct gatedesc idt[256];
+ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
+ struct spinlock tickslock;
+ uint ticks;
+-
++int trapcount = 0;
+ void
+ tvinit(void)
+ {
+@@ -36,6 +36,7 @@ idtinit(void)
+ void
+ trap(struct trapframe *tf)
+ {
++  trapcount++;
+   if(tf->trapno == T_SYSCALL){
+     if(myproc()->killed)
+       exit();
+diff --git a/user.h b/user.h
+index 4f99c52..c7d82e1 100644
+--- a/user.h
++++ b/user.h
+@@ -23,6 +23,8 @@ int getpid(void);
+ char* sbrk(int);
+ int sleep(int);
+ int uptime(void);
++void syscall(void);
++int newsyscall(void);
+ 
+ // ulib.c
+ int stat(const char*, struct stat*);
+diff --git a/usys.S b/usys.S
+index 8bfd8a1..39aeade 100644
+--- a/usys.S
++++ b/usys.S
+@@ -29,3 +29,4 @@ SYSCALL(getpid)
+ SYSCALL(sbrk)
+ SYSCALL(sleep)
+ SYSCALL(uptime)
++SYSCALL(newsyscall)
