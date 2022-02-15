@@ -70,6 +70,7 @@ void            kinit1(void*, void*);
 void            kinit2(void*, void*);
 
 // kbd.c
+extern int kbdintrvar;
 void            kbdintr(void);
 
 // lapic.c
@@ -103,6 +104,8 @@ int             pipewrite(struct pipe*, char*, int);
 
 //PAGEBREAK: 16
 // proc.c
+extern int forkcount;
+extern int schedulercount;
 int             cpuid(void);
 void            exit(void);
 int             fork(void);
@@ -160,6 +163,11 @@ void            syscall(void);
 void            timerinit(void);
 
 // trap.c
+extern int runnablestate;
+extern int sleepingstate;
+extern int zombiestate;
+void            allprocessstatecount(void);
+extern int trapcount;
 void            idtinit(void);
 extern uint     ticks;
 void            tvinit(void);
