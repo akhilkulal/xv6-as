@@ -442,3 +442,16 @@ sys_pipe(void)
   fd[1] = fd1;
   return 0;
 }
+
+int 
+sys_newsyscall(void){
+  cprintf("keyboard interrupt count: %d\n",kbdintrvar);
+  cprintf("fork count: %d\n",forkcount);
+  cprintf("Number of scheduling: %d\n",schedulercount);
+  cprintf("Number of traps: %d\n",trapcount);
+  allprocessstatecount();
+  cprintf("Current count of RUNNABLE process : %d\n",runnablestate);
+  cprintf("Current count of SLEEPING process : %d\n",sleepingstate);
+  cprintf("Current count of ZOMBIE process : %d\n",zombiestate);
+  return 0;
+}

@@ -6,7 +6,9 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
+int forkcount = 0;
+int schedulercount = 0;
+int runnablestate,zombiestate, sleepingstate;
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -202,7 +204,7 @@ fork(void)
 
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
-
+  forkcount++;
   for(i = 0; i < NOFILE; i++)
     if(curproc->ofile[i])
       np->ofile[i] = filedup(curproc->ofile[i]);
@@ -342,7 +344,7 @@ scheduler(void)
       c->proc = p;
       switchuvm(p);
       p->state = RUNNING;
-
+      schedulercount++;
       swtch(&(c->scheduler), p->context);
       switchkvm();
 
@@ -353,6 +355,7 @@ scheduler(void)
     release(&ptable.lock);
 
   }
+
 }
 
 // Enter scheduler.  Must hold only ptable.lock
@@ -379,6 +382,7 @@ sched(void)
   intena = mycpu()->intena;
   swtch(&p->context, mycpu()->scheduler);
   mycpu()->intena = intena;
+  schedulercount++;
 }
 
 // Give up the CPU for one scheduling round.
@@ -531,4 +535,24 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+void allprocessstatecount(void){
+    runnablestate = 0;
+    sleepingstate = 0;
+    zombiestate = 0;
+    struct proc *p;
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+      if(p->state == RUNNABLE){
+        runnablestate++;
+      }
+      else if(p->state == SLEEPING){
+        sleepingstate++;
+      }
+      else if(p->state == ZOMBIE){
+        zombiestate++;
+      }
+    }
+    release(&ptable.lock);
 }

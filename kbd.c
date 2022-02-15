@@ -2,7 +2,7 @@
 #include "x86.h"
 #include "defs.h"
 #include "kbd.h"
-
+int kbdintrvar = 0;
 int
 kbdgetc(void)
 {
@@ -46,5 +46,6 @@ kbdgetc(void)
 void
 kbdintr(void)
 {
+  kbdintrvar++;
   consoleintr(kbdgetc);
 }
